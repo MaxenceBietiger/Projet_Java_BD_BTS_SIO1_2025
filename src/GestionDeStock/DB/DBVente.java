@@ -4,7 +4,7 @@ import java.sql.*;
 import java.util.ArrayList;
 
 import GestionDeStock.Modele.Vente;
-import GestionDeStock.Utils.ValidationUtils;
+import GestionDeStock.validation.Validation;
 
 public class DBVente {
 
@@ -79,22 +79,84 @@ public class DBVente {
     }
 
     public void modifierVente(Vente vente) {
-        if (!validerVente(vente)) {
-            System.out.println("Données de la vente invalides.");
-            return;
-        }
-
         String sql = "UPDATE vente SET dateVente = ?, montantVente = ?, idProduit = ? WHERE idVente = ?";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            // Désactiver l'auto-commit pour la transaction
+            conn.setAutoCommit(false);
+            
+            try {
+                // Vérifier si la vente existe
+                String checkVente = "SELECT idProduit FROM vente WHERE idVente = ?";
+                try (PreparedStatement checkStmt = conn.prepareStatement(checkVente)) {
+                    checkStmt.setInt(1, vente.getIdVente());
+                    ResultSet rs = checkStmt.executeQuery();
+                    
+                    if (!rs.next()) {
+                        throw new SQLException("La vente avec l'ID " + vente.getIdVente() + " n'existe pas.");
+                    }
+                    
+                    int ancienProduitId = rs.getInt("idProduit");
+                    
+                    // Si le produit change, vérifier le stock du nouveau produit
+                    if (ancienProduitId != vente.getIdProduit()) {
+                        String checkProduct = "SELECT quantite FROM produits WHERE idProduits = ?";
+                        try (PreparedStatement prodStmt = conn.prepareStatement(checkProduct)) {
+                            prodStmt.setInt(1, vente.getIdProduit());
+                            ResultSet prodRs = prodStmt.executeQuery();
+                            
+                            if (!prodRs.next()) {
+                                throw new SQLException("Le produit avec l'ID " + vente.getIdProduit() + " n'existe pas.");
+                            }
+                            
+                            int stockActuel = prodRs.getInt("quantite");
+                            if (stockActuel <= 0) {
+                                throw new SQLException("Stock insuffisant pour le nouveau produit " + vente.getIdProduit());
+                            }
+                            
+                            // Mettre à jour les stocks
+                            String updateStockAncien = "UPDATE produits SET quantite = quantite + 1 WHERE idProduits = ?";
+                            String updateStockNouveau = "UPDATE produits SET quantite = quantite - 1 WHERE idProduits = ?";
+                            
+                            try (PreparedStatement updateAncien = conn.prepareStatement(updateStockAncien);
+                                 PreparedStatement updateNouveau = conn.prepareStatement(updateStockNouveau)) {
+                                
+                                updateAncien.setInt(1, ancienProduitId);
+                                updateAncien.executeUpdate();
+                                
+                                updateNouveau.setInt(1, vente.getIdProduit());
+                                updateNouveau.executeUpdate();
+                            }
+                        }
+                    }
+                }
 
-            pstmt.setString(1, vente.getDateVente());
-            pstmt.setDouble(2, vente.getMontantVente());
-            pstmt.setInt(3, vente.getIdProduit());
-            pstmt.setInt(4, vente.getIdVente());
-            pstmt.executeUpdate();
+                // Mettre à jour la vente
+                try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                    pstmt.setString(1, vente.getDateVente());
+                    pstmt.setDouble(2, vente.getMontantVente());
+                    pstmt.setInt(3, vente.getIdProduit());
+                    pstmt.setInt(4, vente.getIdVente());
+                    
+                    int rowsAffected = pstmt.executeUpdate();
+                    if (rowsAffected == 0) {
+                        throw new SQLException("La modification de la vente a échoué.");
+                    }
+                }
+
+                // Valider la transaction
+                conn.commit();
+                System.out.println("Vente modifiée avec succès, ID: " + vente.getIdVente());
+                
+            } catch (SQLException e) {
+                // En cas d'erreur, annuler la transaction
+                conn.rollback();
+                System.err.println("Erreur lors de la modification de la vente: " + e.getMessage());
+                throw new RuntimeException("Erreur lors de la modification de la vente: " + e.getMessage());
+            }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Erreur de connexion: " + e.getMessage());
+            throw new RuntimeException("Erreur de connexion à la base de données: " + e.getMessage());
         }
     }
 
