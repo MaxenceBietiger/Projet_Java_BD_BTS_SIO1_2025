@@ -15,3 +15,5 @@ Ensuite, on modifie le fichier <strong>/DB/DatabaseConnection</strong>, et on y 
 Et enfin, on lance le fichier <strong>GUIGestionDeStock.java</strong>.
 
 L'application est opérationelle.
+
+Modification du README.MD
